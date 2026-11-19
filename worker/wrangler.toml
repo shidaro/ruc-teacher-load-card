@@ -1,0 +1,7 @@
+name = "ruc-teacher-load-card-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-19"
+
+[vars]
+# GitHub Pages site origin. Keep this as an origin only, without the repository path.
+ALLOWED_ORIGIN = "https://shidaro.github.io"
