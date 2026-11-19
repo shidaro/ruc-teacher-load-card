@@ -47,12 +47,14 @@ For a monthly workflow, request a date in each week overlapping that month, then
 ## Repository state
 
 - A Vue 3 + TypeScript + Vite prototype is scaffolded. It has selectors for branch, employee, and month, loads API data, and displays monthly lesson rows with the MVP 1-hour count.
-- The prototype currently cannot load API data in the browser due to the observed cross-origin/access failure.
+- Direct browser requests to the source API fail because CORS is not enabled. The deployed Worker proxy resolves this for the allowed GitHub Pages origin.
 - A Cloudflare Worker proxy is prepared in `worker/`. It forwards only the known GET endpoints, applies CORS for one configured origin, and the frontend now reads its API base URL from `VITE_SCHEDULE_API_BASE_URL`.
-- The Worker has not been deployed; its upstream connectivity and the Pages build with the deployed Worker URL remain to be confirmed after account setup.
+- Worker is deployed at `https://ruc-teacher-load-card-api.ruc-teacher-load-card.workers.dev`. Its GET branch-list endpoint returned HTTP 200 with `Access-Control-Allow-Origin: https://shidaro.github.io`.
 - A GitHub Pages Actions workflow is prepared in `.github/workflows/pages.yml`. It requires the repository variable `VITE_SCHEDULE_API_BASE_URL`.
-- Before publishing publicly, exclude the supplied `assets/` files from the public Git history. They remain local project references and are not needed by the current app build.
-- Git is initialized locally on branch `main`; GitHub CLI and Wrangler are authenticated for account `shidaro` / its Cloudflare account. No remote repository existed at the last check.
+- Public repository: `https://github.com/shidaro/ruc-teacher-load-card`.
+- Published site: `https://shidaro.github.io/ruc-teacher-load-card/`.
+- The public Git history excludes all supplied `assets/` files. They remain local project references and are not needed by the current app build.
+- Git is initialized locally on branch `main`, tracking `origin/main`.
 
 ## Verification and workflow
 
