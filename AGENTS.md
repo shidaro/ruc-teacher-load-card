@@ -47,7 +47,7 @@ For a monthly workflow, request a date in each week overlapping that month, then
 
 ## Repository state
 
-- The Vue 3 + TypeScript + Vite app has selectors for branch, employee, and month, loads monthly API data, groups supported workload by discipline/group, lets teachers enter student counts for supported assessment types, shows unmatched lessons with a specific reason, and downloads a semicolon-delimited UTF-8 CSV for spreadsheet review. The CSV is a first export step and does not yet preserve the supplied workbook formatting or signature area.
+- The Vue 3 + TypeScript + Vite app has selectors for branch and month plus a name/position search that filters the employee selector, loads monthly API data, groups supported workload by discipline/group, lets teachers enter student counts for supported assessment types, shows unmatched lessons with a specific reason, and downloads a semicolon-delimited UTF-8 CSV for spreadsheet review. The CSV is a first export step and does not yet preserve the supplied workbook formatting or signature area.
 - Direct browser requests to the source API fail because CORS is not enabled. The deployed Worker proxy resolves this for the allowed GitHub Pages origin.
 - A Cloudflare Worker proxy is prepared in `worker/`. It forwards only the known GET endpoints, applies CORS for one configured origin, and the frontend now reads its API base URL from `VITE_SCHEDULE_API_BASE_URL`.
 - Cloudflare Workers Cache is enabled. Worker cache TTLs are route-specific: branches 24 hours, employees 6 hours, schedule 5 minutes. Successful responses receive matching `Cache-Control`; upstream errors are `no-store`.

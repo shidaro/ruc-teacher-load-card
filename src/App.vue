@@ -8,6 +8,7 @@ const today = new Date()
 const monthValue = ref(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
 const branches = ref<Branch[]>([])
 const employees = ref<Employee[]>([])
+const employeeQuery = ref('')
 const selectedBranchId = ref('')
 const selectedEmployeeId = ref('')
 const lessons = ref<Lesson[]>([])
@@ -18,6 +19,14 @@ const loadingSchedule = ref(false)
 const error = ref('')
 
 const selectedEmployee = computed(() => employees.value.find((employee) => employee.GUID === selectedEmployeeId.value))
+const filteredEmployees = computed(() => {
+  const query = employeeQuery.value.trim().toLocaleLowerCase('ru-RU')
+  if (!query) return employees.value
+  return employees.value.filter((employee) =>
+    employee.Name.toLocaleLowerCase('ru-RU').includes(query)
+      || employee.Position?.toLocaleLowerCase('ru-RU').includes(query),
+  )
+})
 const workload = computed(() => calculateWorkload(lessons.value, studentCounts.value))
 const hoursTotal = computed(() => workload.value.totalHours)
 const pendingStudentCount = computed(() => workload.value.studentActivities.filter((activity) => activity.studentCount === undefined).length)
@@ -69,6 +78,7 @@ onMounted(async () => {
 
 watch(selectedBranchId, async (branchId) => {
   employees.value = []
+  employeeQuery.value = ''
   selectedEmployeeId.value = ''
   lessons.value = []
   if (!branchId) return
@@ -99,6 +109,13 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
     loadingSchedule.value = false
   }
 }, { immediate: true })
+
+function handleEmployeeSearch() {
+  const selectedName = selectedEmployee.value?.Name
+  if (selectedName && employeeQuery.value.trim() !== selectedName) {
+    selectedEmployeeId.value = ''
+  }
+}
 </script>
 
 <template>
@@ -132,10 +149,22 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
 
         <label class="field">
           <span class="field-label">Преподаватель</span>
+          <input
+            v-model="employeeQuery"
+            class="employee-search"
+            type="search"
+            placeholder="Начните вводить фамилию или имя"
+            autocomplete="off"
+            :disabled="!selectedBranchId || loadingEmployees || employees.length === 0"
+            @input="handleEmployeeSearch"
+          />
+          <span v-if="employeeQuery && !loadingEmployees" class="search-count">
+            Найдено: {{ filteredEmployees.length }} из {{ employees.length }}
+          </span>
           <span class="select-wrap">
-            <select v-model="selectedEmployeeId" :disabled="!selectedBranchId || loadingEmployees || employees.length === 0">
-              <option value="">{{ loadingEmployees ? 'Загружаем преподавателей…' : 'Выберите преподавателя' }}</option>
-              <option v-for="employee in employees" :key="employee.GUID" :value="employee.GUID">{{ employee.Name }}</option>
+            <select v-model="selectedEmployeeId" :disabled="!selectedBranchId || loadingEmployees || filteredEmployees.length === 0">
+              <option value="">{{ loadingEmployees ? 'Загружаем преподавателей…' : filteredEmployees.length ? 'Выберите преподавателя' : 'Совпадений не найдено' }}</option>
+              <option v-for="employee in filteredEmployees" :key="employee.GUID" :value="employee.GUID">{{ employee.Name }}</option>
             </select>
             <span class="chevron">⌄</span>
           </span>

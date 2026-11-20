@@ -44,6 +44,8 @@ h1 span { color: #7b8995; }
 .select-wrap select:focus, .field input:focus { border-color: #6da1c2; box-shadow: 0 0 0 3px #e8f2f8; }
 .select-wrap select:disabled { color: #a0aab3; background: #fafbfc; }
 .field input { padding-right: 12px; }
+.employee-search { margin-top: -2px; }
+.search-count { margin-top: -4px; color: #89949e; font-size: 10px; }
 .chevron { position: absolute; top: 11px; right: 13px; color: #82909b; font-size: 17px; pointer-events: none; }
 .selection-summary { min-height: 79px; border-top: 1px solid #edf0f2; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .summary-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
