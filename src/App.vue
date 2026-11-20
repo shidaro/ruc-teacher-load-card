@@ -11,14 +11,17 @@ const employees = ref<Employee[]>([])
 const selectedBranchId = ref('')
 const selectedEmployeeId = ref('')
 const lessons = ref<Lesson[]>([])
+const studentCounts = ref<Record<string, number | undefined>>({})
 const loadingBranches = ref(false)
 const loadingEmployees = ref(false)
 const loadingSchedule = ref(false)
 const error = ref('')
 
 const selectedEmployee = computed(() => employees.value.find((employee) => employee.GUID === selectedEmployeeId.value))
-const workload = computed(() => calculateWorkload(lessons.value))
+const workload = computed(() => calculateWorkload(lessons.value, studentCounts.value))
 const hoursTotal = computed(() => workload.value.totalHours)
+const pendingStudentCount = computed(() => workload.value.studentActivities.filter((activity) => activity.studentCount === undefined).length)
+const reviewItemCount = computed(() => pendingStudentCount.value + workload.value.unclassified.length)
 const monthLabel = computed(() => {
   const [year, month] = monthValue.value.split('-').map(Number)
   return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
@@ -33,6 +36,22 @@ function downloadWorkload() {
   link.download = `нагрузка_${teacherName}_${monthValue.value}.csv`
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function updateStudentCount(id: string, event: Event) {
+  const raw = (event.target as HTMLInputElement).value.trim()
+  const value = raw === '' ? undefined : Number(raw)
+  const next = { ...studentCounts.value }
+
+  if (value === undefined) {
+    delete next[id]
+  } else if (Number.isInteger(value) && value >= 0) {
+    next[id] = value
+  } else {
+    delete next[id]
+  }
+
+  studentCounts.value = next
 }
 
 onMounted(async () => {
@@ -67,6 +86,7 @@ watch(selectedBranchId, async (branchId) => {
 
 watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, month, branchId]) => {
   lessons.value = []
+  studentCounts.value = {}
   if (!employeeId || !branchId || !month) return
 
   loadingSchedule.value = true
@@ -174,7 +194,7 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
           <thead>
             <tr>
               <th>Дисциплина</th><th>Группа</th><th>Лекции</th><th>Лабораторные</th><th>Практические, семинарские</th>
-              <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Итого</th>
+              <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Переаттестация</th><th>Защита индивидуального проекта</th><th>Итого</th>
             </tr>
           </thead>
           <tbody>
@@ -182,7 +202,8 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
               <td class="discipline-cell">{{ row.discipline }}</td><td>{{ row.group }}</td>
               <td>{{ row.hours.lecture || '—' }}</td><td>{{ row.hours.lab || '—' }}</td><td>{{ row.hours.practical || '—' }}</td>
               <td>{{ row.hours.consultation || '—' }}</td><td>{{ row.hours.credit || '—' }}</td><td>{{ row.hours.test || '—' }}</td>
-              <td>{{ row.hours.exam || '—' }}</td><td class="hours-cell">{{ row.total }}</td>
+              <td>{{ row.hours.exam || '—' }}</td><td>{{ row.hours.reattestation || '—' }}</td><td>{{ row.hours.individualProject || '—' }}</td>
+              <td class="hours-cell">{{ row.total }}</td>
             </tr>
             <tr class="summary-total">
               <td colspan="2">Итого</td>
@@ -193,15 +214,51 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
               <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.credit, 0) || '—' }}</td>
               <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.test, 0) || '—' }}</td>
               <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.exam, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.reattestation, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.individualProject, 0) || '—' }}</td>
               <td class="hours-cell">{{ hoursTotal }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div v-if="workload.unclassified.length > 0 && !loadingSchedule" class="results-footnote results-footnote-warning">
+      <div v-if="reviewItemCount > 0 && !loadingSchedule" class="results-footnote results-footnote-warning">
         <span class="info-mark">!</span>
-        Не вошли в расчёт {{ workload.unclassified.length }} занятий: для части типов нужны данные о студентах, остальные требуют уточнения нормы.
+        {{ reviewItemCount }} занятий требуют внимания: {{ pendingStudentCount }} — введите число студентов, {{ workload.unclassified.length }} — уточните норму. Список ниже.
       </div>
+      <section v-if="workload.studentActivities.length > 0 || workload.unclassified.length > 0" class="review-section">
+        <h3 class="detail-heading">Занятия, требующие данных или уточнения</h3>
+        <div v-if="workload.studentActivities.length > 0" class="table-frame review-table-frame">
+          <table class="review-table">
+            <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Норма</th><th>Студентов</th><th>Часы</th></tr></thead>
+            <tbody>
+              <tr v-for="activity in workload.studentActivities" :key="activity.id">
+                <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
+                <td>{{ activity.lesson.Type }}</td>
+                <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
+                <td>{{ activity.lesson.Group || '—' }}</td>
+                <td>{{ activity.ratePerStudent.toLocaleString('ru-RU') }} ч / студент<br /><small>{{ activity.rule }}</small></td>
+                <td><input class="student-count-input" type="number" min="0" step="1" inputmode="numeric" :aria-label="`Количество студентов: ${activity.lesson.Discipline}, ${activity.lesson.Group}`" :value="activity.studentCount ?? ''" @input="updateStudentCount(activity.id, $event)" /></td>
+                <td class="hours-cell">{{ activity.studentCount === undefined ? '—' : activity.hours.toLocaleString('ru-RU') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="workload.studentActivities.length > 0" class="review-help">Введите число студентов, к которым относится конкретная аттестация или защита. Часы пересчитаются автоматически. Введённые числа сохраняются только пока открыта эта страница.</p>
+        <div v-if="workload.unclassified.length > 0" class="table-frame review-table-frame">
+          <table class="review-table">
+            <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Что уточнить</th></tr></thead>
+            <tbody>
+              <tr v-for="activity in workload.unclassified" :key="activity.id">
+                <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
+                <td>{{ activity.lesson.Type || 'Тип не указан' }}</td>
+                <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
+                <td>{{ activity.lesson.Group || '—' }}</td>
+                <td class="review-reason">{{ activity.reason }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
       <h3 v-if="lessons.length > 0" class="detail-heading">Исходные занятия</h3>
       <div v-if="lessons.length > 0" class="table-frame">
         <table>

@@ -1,6 +1,6 @@
 import type { Lesson } from '../api/schedule'
 
-export type WorkloadColumn = 'lecture' | 'lab' | 'practical' | 'consultation' | 'credit' | 'test' | 'exam'
+export type WorkloadColumn = 'lecture' | 'lab' | 'practical' | 'consultation' | 'credit' | 'test' | 'exam' | 'reattestation' | 'individualProject'
 
 export interface WorkloadRow {
   discipline: string
@@ -12,10 +12,27 @@ export interface WorkloadRow {
 export interface WorkloadSummary {
   rows: WorkloadRow[]
   totalHours: number
-  unclassified: Lesson[]
+  studentActivities: StudentActivity[]
+  unclassified: UnclassifiedActivity[]
 }
 
-const columns: WorkloadColumn[] = ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam']
+export interface StudentActivity {
+  id: string
+  lesson: Lesson
+  ratePerStudent: number
+  column: 'reattestation' | 'individualProject'
+  rule: string
+  studentCount?: number
+  hours: number
+}
+
+export interface UnclassifiedActivity {
+  id: string
+  lesson: Lesson
+  reason: string
+}
+
+const columns: WorkloadColumn[] = ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'reattestation', 'individualProject']
 
 // Rates and API type mapping are kept outside the UI so they can be refined independently.
 const classroomTypes: Array<{ column: WorkloadColumn; pattern: RegExp }> = [
@@ -47,10 +64,17 @@ function assessmentKey(lesson: Lesson, kind: string) {
   return `${rowKey(lesson)}\u0000${kind}`
 }
 
-export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
+function activityId(lesson: Lesson) {
+  return [lesson.Data, lesson.Time, lesson.Time_start, lesson.Time_end, lesson.Type, lesson.Discipline, lesson.Group, lesson.SubGroup, lesson.Classroom]
+    .map((value) => normalized(value ?? ''))
+    .join('\u0000')
+}
+
+export function calculateWorkload(lessons: Lesson[], studentCounts: Record<string, number | undefined> = {}): WorkloadSummary {
   const byGroup = new Map<string, WorkloadRow>()
   const classroomSessions = new Map<string, { lesson: Lesson; groups: Set<string>; hours: number; column: WorkloadColumn }>()
-  const unclassified: Lesson[] = []
+  const studentActivities = new Map<string, StudentActivity>()
+  const unclassified = new Map<string, UnclassifiedActivity>()
   const oncePerGroupDiscipline = new Set<string>()
 
   function getRow(lesson: Lesson) {
@@ -74,7 +98,8 @@ export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
     if (classroom) {
       const hours = scheduledHours(lesson.Time ?? '')
       if (hours === undefined) {
-        unclassified.push(lesson)
+        const id = activityId(lesson)
+        unclassified.set(id, { id, lesson, reason: `Не удалось определить длительность по полю Time «${lesson.Time || 'пусто'}».` })
         continue
       }
 
@@ -121,7 +146,40 @@ export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
     }
 
     if (!column) {
-      unclassified.push(lesson)
+      const id = activityId(lesson)
+      let studentRule: Omit<StudentActivity, 'id' | 'lesson' | 'studentCount' | 'hours'> | undefined
+
+      if (/защит.*индивидуальн.{0,20}проект|индивидуальн.{0,20}проект.*защит/.test(type)) {
+        studentRule = { ratePerStudent: 0.5, column: 'individualProject', rule: 'Приказ, приложение 2, п. 1.7: 0,5 ч на студента.' }
+      } else if (/повторн.*(аттестаци|зачет|экзамен|защит)|переаттестаци/.test(type)) {
+        studentRule = { ratePerStudent: 0.2, column: 'reattestation', rule: 'Приказ, приложение 2, п. 1.5: 0,2 ч на студента по дисциплине.' }
+      }
+
+      if (studentRule) {
+        if (!studentActivities.has(id)) {
+          const count = studentCounts[id]
+          const validCount = Number.isInteger(count) && count! >= 0 ? count : undefined
+          studentActivities.set(id, {
+            id,
+            lesson,
+            ...studentRule,
+            studentCount: validCount,
+            hours: validCount === undefined ? 0 : validCount * studentRule.ratePerStudent,
+          })
+        }
+        continue
+      }
+
+      const reason = /курсов|индивидуальн.{0,20}проект/.test(type)
+        ? 'Нужно уточнить вид работы: в приказе для курсовой есть нормы за руководство и защиту, а также отдельная норма для переаттестации.'
+        : /выпускн.{0,20}квалификационн|государственн.{0,20}экзамен|^гиа$/.test(type)
+          ? 'Нужны число студентов, роль преподавателя в комиссии и состав комиссии: норма зависит от этих данных.'
+          : /квалификационн.{0,20}экзамен|экзамен.{0,20}модул/.test(type)
+            ? 'Нужно уточнить, относится ли это к квалификационному экзамену по модулю, и указать число студентов и состав комиссии.'
+            : /практик/.test(type)
+              ? 'Нужно уточнить вид практики, форму обучения и период расчёта; этих данных нет в записи занятия.'
+              : 'Название не сопоставлено с пунктом приказа. Нужно уточнить вид работы, норму часов и расчётную единицу (занятие, группа или студент).'
+      unclassified.set(id, { id, lesson, reason })
       continue
     }
 
@@ -148,20 +206,30 @@ export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
     row.hours[session.column] += session.hours
   }
 
+  for (const activity of studentActivities.values()) {
+    const row = getRow(activity.lesson)
+    row.hours[activity.column] += activity.hours
+  }
+
   const rows = [...byGroup.values()].map((row) => {
     row.total = columns.reduce((sum, column) => sum + row.hours[column], 0)
     return row
   }).sort((left, right) => left.discipline.localeCompare(right.discipline, 'ru') || left.group.localeCompare(right.group, 'ru'))
 
-  return { rows, totalHours: rows.reduce((sum, row) => sum + row.total, 0), unclassified }
+  return {
+    rows,
+    totalHours: rows.reduce((sum, row) => sum + row.total, 0),
+    studentActivities: [...studentActivities.values()],
+    unclassified: [...unclassified.values()],
+  }
 }
 
 export function workloadCsv(summary: WorkloadSummary) {
-  const header = ['№ п/п', 'Дисциплина', 'Группа', 'Лекции', 'Лабораторные', 'Практические, семинарские', 'Консультации', 'Зачёты, дифференцированные зачёты', 'Аудиторные контрольные работы', 'Экзамены', 'Итого']
+  const header = ['№ п/п', 'Дисциплина', 'Группа', 'Лекции', 'Лабораторные', 'Практические, семинарские', 'Консультации', 'Зачёты, дифференцированные зачёты', 'Аудиторные контрольные работы', 'Экзамены', 'Переаттестация', 'Защита индивидуального проекта', 'Итого']
   const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
   const lines = [header, ...summary.rows.map((row, index) => [
     index + 1, row.discipline, row.group, row.hours.lecture, row.hours.lab, row.hours.practical,
-    row.hours.consultation, row.hours.credit, row.hours.test, row.hours.exam, row.total,
+    row.hours.consultation, row.hours.credit, row.hours.test, row.hours.exam, row.hours.reattestation, row.hours.individualProject, row.total,
   ])]
   lines.push(['', 'Итого', '', ...columns.map((column) => summary.rows.reduce((sum, row) => sum + row.hours[column], 0)), summary.totalHours])
   return `\uFEFF${lines.map((line) => line.map(escape).join(';')).join('\r\n')}`
