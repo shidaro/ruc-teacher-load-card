@@ -146,7 +146,7 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
           <h2>Занятия за месяц</h2>
         </div>
         <div class="total-card">
-          <span>Часы по приказу</span>
+          <span>Академические часы</span>
           <strong>{{ loadingSchedule ? '…' : hoursTotal }}</strong>
           <small>по доступным данным расписания</small>
         </div>
@@ -222,7 +222,7 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
       </div>
       <div v-if="lessons.length > 0 && !loadingSchedule" class="results-footnote">
         <span class="info-mark">i</span>
-        Аудиторное занятие — 1 час на группу; зачёт и экзамен — 0,5 часа на группу и дисциплину.
+        Пара в расписании = 2 акад. часа; «Урок N» = 1 час. Совпадающие занятия для нескольких групп объединены.
       </div>
     </section>
 

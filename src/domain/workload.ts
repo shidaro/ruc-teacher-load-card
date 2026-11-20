@@ -32,12 +32,24 @@ function rowKey(lesson: Lesson) {
   return `${normalized(lesson.Discipline)}\u0000${normalized(lesson.Group)}`
 }
 
+function groupSetKey(discipline: string, groups: string[]) {
+  return `${normalized(discipline)}\u0000${groups.map(normalized).join('\u0001')}`
+}
+
+function scheduledHours(value: string) {
+  const time = value.trim()
+  if (/^урок\s*\d+$/i.test(time)) return 1
+  if (/^\d+$/.test(time)) return 2
+  return undefined
+}
+
 function assessmentKey(lesson: Lesson, kind: string) {
   return `${rowKey(lesson)}\u0000${kind}`
 }
 
 export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
   const byGroup = new Map<string, WorkloadRow>()
+  const classroomSessions = new Map<string, { lesson: Lesson; groups: Set<string>; hours: number; column: WorkloadColumn }>()
   const unclassified: Lesson[] = []
   const oncePerGroupDiscipline = new Set<string>()
 
@@ -60,7 +72,29 @@ export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
     const type = normalized(lesson.Type ?? '')
     const classroom = classroomTypes.find((entry) => entry.pattern.test(type))
     if (classroom) {
-      getRow(lesson).hours[classroom.column] += 1 // Appendix 2, item 1.1: one hour per class per group.
+      const hours = scheduledHours(lesson.Time ?? '')
+      if (hours === undefined) {
+        unclassified.push(lesson)
+        continue
+      }
+
+      // The schedule repeats one joint class once per group. Combine those entries before counting it.
+      const sessionKey = [
+        lesson.Data,
+        lesson.Time,
+        lesson.Time_start,
+        lesson.Time_end,
+        type,
+        normalized(lesson.Discipline ?? ''),
+        normalized(lesson.SubGroup ?? ''),
+        normalized(lesson.Classroom ?? ''),
+      ].join('\u0000')
+      let session = classroomSessions.get(sessionKey)
+      if (!session) {
+        session = { lesson, groups: new Set(), hours, column: classroom.column }
+        classroomSessions.set(sessionKey, session)
+      }
+      if (lesson.Group?.trim()) session.groups.add(lesson.Group.trim())
       continue
     }
 
@@ -95,6 +129,23 @@ export function calculateWorkload(lessons: Lesson[]): WorkloadSummary {
     if (oncePerGroupDiscipline.has(key)) continue
     oncePerGroupDiscipline.add(key)
     getRow(lesson).hours[column] += rate
+  }
+
+  for (const session of classroomSessions.values()) {
+    const groups = [...session.groups].sort((left, right) => left.localeCompare(right, 'ru'))
+    const groupLabel = groups.join('; ') || 'Группа не указана'
+    const key = groupSetKey(session.lesson.Discipline ?? '', groups)
+    let row = byGroup.get(key)
+    if (!row) {
+      row = {
+        discipline: session.lesson.Discipline?.trim() || 'Дисциплина не указана',
+        group: groupLabel,
+        hours: Object.fromEntries(columns.map((column) => [column, 0])) as Record<WorkloadColumn, number>,
+        total: 0,
+      }
+      byGroup.set(key, row)
+    }
+    row.hours[session.column] += session.hours
   }
 
   const rows = [...byGroup.values()].map((row) => {
