@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { formatLessonDate, getBranches, getEmployees, getMonthlySchedule } from './api/schedule'
 import type { Branch, Employee, Lesson } from './api/schedule'
-import { calculateWorkload, workloadCsv } from './domain/workload'
+import { calculateWorkload, formatHours, roundHours } from './domain/workload'
 
 const today = new Date()
 const monthValue = ref(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
@@ -17,6 +17,7 @@ const loadingBranches = ref(false)
 const loadingEmployees = ref(false)
 const loadingSchedule = ref(false)
 const error = ref('')
+const exportError = ref('')
 
 const selectedEmployee = computed(() => employees.value.find((employee) => employee.GUID === selectedEmployeeId.value))
 const filteredEmployees = computed(() => {
@@ -29,6 +30,12 @@ const filteredEmployees = computed(() => {
 })
 const workload = computed(() => calculateWorkload(lessons.value, studentCounts.value))
 const hoursTotal = computed(() => workload.value.totalHours)
+const workloadColumnTotals = computed(() => Object.fromEntries(
+  ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'reattestation', 'individualProject'].map((column) => [
+    column,
+    roundHours(workload.value.rows.reduce((sum, row) => sum + row.hours[column as keyof typeof row.hours], 0)),
+  ]),
+) as Record<string, number>)
 const pendingStudentCount = computed(() => workload.value.studentActivities.filter((activity) => activity.studentCount === undefined).length)
 const reviewItemCount = computed(() => pendingStudentCount.value + workload.value.unclassified.length)
 const monthLabel = computed(() => {
@@ -36,15 +43,14 @@ const monthLabel = computed(() => {
   return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
 })
 
-function downloadWorkload() {
-  const blob = new Blob([workloadCsv(workload.value)], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  const teacherName = selectedEmployee.value?.Name?.replace(/[^\p{L}\p{N}-]+/gu, '_') || 'преподаватель'
-  link.href = url
-  link.download = `нагрузка_${teacherName}_${monthValue.value}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
+async function downloadWorkload() {
+  exportError.value = ''
+  try {
+    const { downloadWorkloadXlsx } = await import('./domain/xlsxExport')
+    await downloadWorkloadXlsx(workload.value, selectedEmployee.value?.Name || 'преподаватель', monthValue.value)
+  } catch (cause) {
+    exportError.value = cause instanceof Error ? cause.message : 'Не удалось подготовить файл XLSX.'
+  }
 }
 
 function updateStudentCount(id: string, event: Event) {
@@ -201,9 +207,10 @@ function handleEmployeeSearch() {
         </div>
       </div>
       <div v-if="workload.rows.length > 0" class="export-row">
-        <button class="export-button" type="button" @click="downloadWorkload">Скачать расчёт в CSV</button>
-        <span>Файл откроется в Excel; пока выгружаются только рассчитанные категории.</span>
+        <button class="export-button" type="button" @click="downloadWorkload">Скачать карточку в XLSX</button>
+        <span>Сохраняется бланк карточки с расчётом и отдельным листом проверки.</span>
       </div>
+      <div v-if="exportError" class="message message-error"><span>{{ exportError }}</span></div>
 
       <div v-if="error" class="message message-error">
         <strong>Не удалось получить данные</strong>
@@ -236,7 +243,7 @@ function handleEmployeeSearch() {
                   <td>{{ activity.lesson.Group || '—' }}</td>
                   <td>{{ activity.ratePerStudent.toLocaleString('ru-RU') }} ч / студент<br /><small>{{ activity.rule }}</small></td>
                   <td><input class="student-count-input" type="number" min="0" step="1" inputmode="numeric" :aria-label="`Количество студентов: ${activity.lesson.Discipline}, ${activity.lesson.Group}`" :value="activity.studentCount ?? ''" @input="updateStudentCount(activity.id, $event)" /></td>
-                  <td class="hours-cell">{{ activity.studentCount === undefined ? '—' : activity.hours.toLocaleString('ru-RU') }}</td>
+                  <td class="hours-cell">{{ activity.studentCount === undefined ? '—' : formatHours(activity.hours) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -268,23 +275,23 @@ function handleEmployeeSearch() {
             <tbody>
               <tr v-for="(row, index) in workload.rows" :key="`${row.discipline}-${row.group}-${index}`">
                 <td class="discipline-cell">{{ row.discipline }}</td><td>{{ row.group }}</td>
-                <td>{{ row.hours.lecture || '—' }}</td><td>{{ row.hours.lab || '—' }}</td><td>{{ row.hours.practical || '—' }}</td>
-                <td>{{ row.hours.consultation || '—' }}</td><td>{{ row.hours.credit || '—' }}</td><td>{{ row.hours.test || '—' }}</td>
-                <td>{{ row.hours.exam || '—' }}</td><td>{{ row.hours.reattestation || '—' }}</td><td>{{ row.hours.individualProject || '—' }}</td>
-                <td class="hours-cell">{{ row.total }}</td>
+                <td>{{ row.hours.lecture ? formatHours(row.hours.lecture) : '—' }}</td><td>{{ row.hours.lab ? formatHours(row.hours.lab) : '—' }}</td><td>{{ row.hours.practical ? formatHours(row.hours.practical) : '—' }}</td>
+                <td>{{ row.hours.consultation ? formatHours(row.hours.consultation) : '—' }}</td><td>{{ row.hours.credit ? formatHours(row.hours.credit) : '—' }}</td><td>{{ row.hours.test ? formatHours(row.hours.test) : '—' }}</td>
+                <td>{{ row.hours.exam ? formatHours(row.hours.exam) : '—' }}</td><td>{{ row.hours.reattestation ? formatHours(row.hours.reattestation) : '—' }}</td><td>{{ row.hours.individualProject ? formatHours(row.hours.individualProject) : '—' }}</td>
+                <td class="hours-cell">{{ formatHours(row.total) }}</td>
               </tr>
               <tr class="summary-total">
                 <td colspan="2">Итого</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lecture, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lab, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.practical, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.consultation, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.credit, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.test, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.exam, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.reattestation, 0) || '—' }}</td>
-                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.individualProject, 0) || '—' }}</td>
-                <td class="hours-cell">{{ hoursTotal }}</td>
+                <td>{{ workloadColumnTotals.lecture ? formatHours(workloadColumnTotals.lecture) : '—' }}</td>
+                <td>{{ workloadColumnTotals.lab ? formatHours(workloadColumnTotals.lab) : '—' }}</td>
+                <td>{{ workloadColumnTotals.practical ? formatHours(workloadColumnTotals.practical) : '—' }}</td>
+                <td>{{ workloadColumnTotals.consultation ? formatHours(workloadColumnTotals.consultation) : '—' }}</td>
+                <td>{{ workloadColumnTotals.credit ? formatHours(workloadColumnTotals.credit) : '—' }}</td>
+                <td>{{ workloadColumnTotals.test ? formatHours(workloadColumnTotals.test) : '—' }}</td>
+                <td>{{ workloadColumnTotals.exam ? formatHours(workloadColumnTotals.exam) : '—' }}</td>
+                <td>{{ workloadColumnTotals.reattestation ? formatHours(workloadColumnTotals.reattestation) : '—' }}</td>
+                <td>{{ workloadColumnTotals.individualProject ? formatHours(workloadColumnTotals.individualProject) : '—' }}</td>
+                <td class="hours-cell">{{ formatHours(hoursTotal) }}</td>
               </tr>
             </tbody>
           </table>

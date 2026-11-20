@@ -47,7 +47,9 @@ For a monthly workflow, request a date in each week overlapping that month, then
 
 ## Repository state
 
-- The Vue 3 + TypeScript + Vite app has selectors for branch and month plus a name/position search that filters the employee selector, loads monthly API data, groups supported workload by discipline/group, lets teachers enter student counts for supported assessment types, shows the review queue above the calculation summary, and downloads a semicolon-delimited UTF-8 CSV for spreadsheet review. The CSV is a first export step and does not yet preserve the supplied workbook formatting or signature area.
+- The Vue 3 + TypeScript + Vite app has selectors for branch and month plus a name/position search that filters the employee selector, loads monthly API data, groups supported workload by discipline/group, lets teachers enter student counts for supported assessment types, and shows the review queue above the calculation summary.
+- XLSX export uses the sanitized `public/workload-template.xlsx`, fills the existing card sheet, keeps the workbook layout/signature area, and adds a `Проверка` sheet when activities need student counts or manual review. The public template excludes the example worksheet and example signatory names; source assets remain local and ignored.
+- Workload hour values are rounded to two decimal places after aggregation to avoid binary floating-point artifacts such as `0.6000000000000001`.
 - Direct browser requests to the source API fail because CORS is not enabled. The deployed Worker proxy resolves this for the allowed GitHub Pages origin.
 - A Cloudflare Worker proxy is prepared in `worker/`. It forwards only the known GET endpoints, applies CORS for one configured origin, and the frontend now reads its API base URL from `VITE_SCHEDULE_API_BASE_URL`.
 - Cloudflare Workers Cache is enabled. Worker cache TTLs are route-specific: branches 24 hours, employees 6 hours, schedule 5 minutes. Successful responses receive matching `Cache-Control`; upstream errors are `no-store`.

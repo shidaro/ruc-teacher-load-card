@@ -34,6 +34,16 @@ export interface UnclassifiedActivity {
 
 const columns: WorkloadColumn[] = ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'reattestation', 'individualProject']
 
+// Workload rates use halves and tenths of an hour. Round each accumulated result
+// to two decimal places to avoid exposing binary floating-point artifacts.
+export function roundHours(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+export function formatHours(value: number) {
+  return roundHours(value).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+}
+
 // Rates and API type mapping are kept outside the UI so they can be refined independently.
 const classroomTypes: Array<{ column: WorkloadColumn; pattern: RegExp }> = [
   { column: 'lecture', pattern: /лекц/i },
@@ -164,7 +174,7 @@ export function calculateWorkload(lessons: Lesson[], studentCounts: Record<strin
             lesson,
             ...studentRule,
             studentCount: validCount,
-            hours: validCount === undefined ? 0 : validCount * studentRule.ratePerStudent,
+            hours: validCount === undefined ? 0 : roundHours(validCount * studentRule.ratePerStudent),
           })
         }
         continue
@@ -212,25 +222,16 @@ export function calculateWorkload(lessons: Lesson[], studentCounts: Record<strin
   }
 
   const rows = [...byGroup.values()].map((row) => {
-    row.total = columns.reduce((sum, column) => sum + row.hours[column], 0)
+    for (const column of columns) row.hours[column] = roundHours(row.hours[column])
+    row.total = roundHours(columns.reduce((sum, column) => sum + row.hours[column], 0))
     return row
   }).sort((left, right) => left.discipline.localeCompare(right.discipline, 'ru') || left.group.localeCompare(right.group, 'ru'))
 
   return {
     rows,
-    totalHours: rows.reduce((sum, row) => sum + row.total, 0),
+    totalHours: roundHours(rows.reduce((sum, row) => sum + row.total, 0)),
     studentActivities: [...studentActivities.values()],
     unclassified: [...unclassified.values()],
   }
 }
 
-export function workloadCsv(summary: WorkloadSummary) {
-  const header = ['№ п/п', 'Дисциплина', 'Группа', 'Лекции', 'Лабораторные', 'Практические, семинарские', 'Консультации', 'Зачёты, дифференцированные зачёты', 'Аудиторные контрольные работы', 'Экзамены', 'Переаттестация', 'Защита индивидуального проекта', 'Итого']
-  const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`
-  const lines = [header, ...summary.rows.map((row, index) => [
-    index + 1, row.discipline, row.group, row.hours.lecture, row.hours.lab, row.hours.practical,
-    row.hours.consultation, row.hours.credit, row.hours.test, row.hours.exam, row.hours.reattestation, row.hours.individualProject, row.total,
-  ])]
-  lines.push(['', 'Итого', '', ...columns.map((column) => summary.rows.reduce((sum, row) => sum + row.hours[column], 0)), summary.totalHours])
-  return `\uFEFF${lines.map((line) => line.map(escape).join(';')).join('\r\n')}`
-}
