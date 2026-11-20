@@ -218,76 +218,78 @@ function handleEmployeeSearch() {
       <div v-else-if="lessons.length === 0" class="message message-empty">
         В расписании нет занятий за {{ monthLabel }}.
       </div>
-      <div v-else class="table-frame">
-        <table class="summary-table">
-          <thead>
-            <tr>
-              <th>Дисциплина</th><th>Группа</th><th>Лекции</th><th>Лабораторные</th><th>Практические, семинарские</th>
-              <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Переаттестация</th><th>Защита индивидуального проекта</th><th>Итого</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, index) in workload.rows" :key="`${row.discipline}-${row.group}-${index}`">
-              <td class="discipline-cell">{{ row.discipline }}</td><td>{{ row.group }}</td>
-              <td>{{ row.hours.lecture || '—' }}</td><td>{{ row.hours.lab || '—' }}</td><td>{{ row.hours.practical || '—' }}</td>
-              <td>{{ row.hours.consultation || '—' }}</td><td>{{ row.hours.credit || '—' }}</td><td>{{ row.hours.test || '—' }}</td>
-              <td>{{ row.hours.exam || '—' }}</td><td>{{ row.hours.reattestation || '—' }}</td><td>{{ row.hours.individualProject || '—' }}</td>
-              <td class="hours-cell">{{ row.total }}</td>
-            </tr>
-            <tr class="summary-total">
-              <td colspan="2">Итого</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lecture, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lab, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.practical, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.consultation, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.credit, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.test, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.exam, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.reattestation, 0) || '—' }}</td>
-              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.individualProject, 0) || '—' }}</td>
-              <td class="hours-cell">{{ hoursTotal }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div v-if="reviewItemCount > 0 && !loadingSchedule" class="results-footnote results-footnote-warning">
-        <span class="info-mark">!</span>
-        {{ reviewItemCount }} занятий требуют внимания: {{ pendingStudentCount }} — введите число студентов, {{ workload.unclassified.length }} — уточните норму. Список ниже.
-      </div>
-      <section v-if="workload.studentActivities.length > 0 || workload.unclassified.length > 0" class="review-section">
-        <h3 class="detail-heading">Занятия, требующие данных или уточнения</h3>
-        <div v-if="workload.studentActivities.length > 0" class="table-frame review-table-frame">
-          <table class="review-table">
-            <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Норма</th><th>Студентов</th><th>Часы</th></tr></thead>
+      <template v-else>
+        <div v-if="reviewItemCount > 0 && !loadingSchedule" class="results-footnote results-footnote-warning">
+          <span class="info-mark">!</span>
+          {{ reviewItemCount }} занятий требуют внимания: {{ pendingStudentCount }} — введите число студентов, {{ workload.unclassified.length }} — уточните норму. Список ниже.
+        </div>
+        <section v-if="workload.studentActivities.length > 0 || workload.unclassified.length > 0" class="review-section">
+          <h3 class="detail-heading">Занятия, требующие данных или уточнения</h3>
+          <div v-if="workload.studentActivities.length > 0" class="table-frame review-table-frame">
+            <table class="review-table">
+              <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Норма</th><th>Студентов</th><th>Часы</th></tr></thead>
+              <tbody>
+                <tr v-for="activity in workload.studentActivities" :key="activity.id">
+                  <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
+                  <td>{{ activity.lesson.Type }}</td>
+                  <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
+                  <td>{{ activity.lesson.Group || '—' }}</td>
+                  <td>{{ activity.ratePerStudent.toLocaleString('ru-RU') }} ч / студент<br /><small>{{ activity.rule }}</small></td>
+                  <td><input class="student-count-input" type="number" min="0" step="1" inputmode="numeric" :aria-label="`Количество студентов: ${activity.lesson.Discipline}, ${activity.lesson.Group}`" :value="activity.studentCount ?? ''" @input="updateStudentCount(activity.id, $event)" /></td>
+                  <td class="hours-cell">{{ activity.studentCount === undefined ? '—' : activity.hours.toLocaleString('ru-RU') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="workload.studentActivities.length > 0" class="review-help">Введите число студентов, к которым относится конкретная аттестация или защита. Часы пересчитаются автоматически. Введённые числа сохраняются только пока открыта эта страница.</p>
+          <div v-if="workload.unclassified.length > 0" class="table-frame review-table-frame">
+            <table class="review-table">
+              <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Что уточнить</th></tr></thead>
+              <tbody>
+                <tr v-for="activity in workload.unclassified" :key="activity.id">
+                  <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
+                  <td>{{ activity.lesson.Type || 'Тип не указан' }}</td>
+                  <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
+                  <td>{{ activity.lesson.Group || '—' }}</td>
+                  <td class="review-reason">{{ activity.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <div class="table-frame">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Дисциплина</th><th>Группа</th><th>Лекции</th><th>Лабораторные</th><th>Практические, семинарские</th>
+                <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Переаттестация</th><th>Защита индивидуального проекта</th><th>Итого</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr v-for="activity in workload.studentActivities" :key="activity.id">
-                <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
-                <td>{{ activity.lesson.Type }}</td>
-                <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
-                <td>{{ activity.lesson.Group || '—' }}</td>
-                <td>{{ activity.ratePerStudent.toLocaleString('ru-RU') }} ч / студент<br /><small>{{ activity.rule }}</small></td>
-                <td><input class="student-count-input" type="number" min="0" step="1" inputmode="numeric" :aria-label="`Количество студентов: ${activity.lesson.Discipline}, ${activity.lesson.Group}`" :value="activity.studentCount ?? ''" @input="updateStudentCount(activity.id, $event)" /></td>
-                <td class="hours-cell">{{ activity.studentCount === undefined ? '—' : activity.hours.toLocaleString('ru-RU') }}</td>
+              <tr v-for="(row, index) in workload.rows" :key="`${row.discipline}-${row.group}-${index}`">
+                <td class="discipline-cell">{{ row.discipline }}</td><td>{{ row.group }}</td>
+                <td>{{ row.hours.lecture || '—' }}</td><td>{{ row.hours.lab || '—' }}</td><td>{{ row.hours.practical || '—' }}</td>
+                <td>{{ row.hours.consultation || '—' }}</td><td>{{ row.hours.credit || '—' }}</td><td>{{ row.hours.test || '—' }}</td>
+                <td>{{ row.hours.exam || '—' }}</td><td>{{ row.hours.reattestation || '—' }}</td><td>{{ row.hours.individualProject || '—' }}</td>
+                <td class="hours-cell">{{ row.total }}</td>
+              </tr>
+              <tr class="summary-total">
+                <td colspan="2">Итого</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lecture, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lab, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.practical, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.consultation, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.credit, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.test, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.exam, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.reattestation, 0) || '—' }}</td>
+                <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.individualProject, 0) || '—' }}</td>
+                <td class="hours-cell">{{ hoursTotal }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-if="workload.studentActivities.length > 0" class="review-help">Введите число студентов, к которым относится конкретная аттестация или защита. Часы пересчитаются автоматически. Введённые числа сохраняются только пока открыта эта страница.</p>
-        <div v-if="workload.unclassified.length > 0" class="table-frame review-table-frame">
-          <table class="review-table">
-            <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Что уточнить</th></tr></thead>
-            <tbody>
-              <tr v-for="activity in workload.unclassified" :key="activity.id">
-                <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
-                <td>{{ activity.lesson.Type || 'Тип не указан' }}</td>
-                <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
-                <td>{{ activity.lesson.Group || '—' }}</td>
-                <td class="review-reason">{{ activity.reason }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      </template>
       <h3 v-if="lessons.length > 0" class="detail-heading">Исходные занятия</h3>
       <div v-if="lessons.length > 0" class="table-frame">
         <table>
