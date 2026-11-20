@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { formatLessonDate, getBranches, getEmployees, getMonthlySchedule } from './api/schedule'
 import type { Branch, Employee, Lesson } from './api/schedule'
+import { calculateWorkload, workloadCsv } from './domain/workload'
 
 const today = new Date()
 const monthValue = ref(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
@@ -16,11 +17,23 @@ const loadingSchedule = ref(false)
 const error = ref('')
 
 const selectedEmployee = computed(() => employees.value.find((employee) => employee.GUID === selectedEmployeeId.value))
-const hoursTotal = computed(() => lessons.value.length)
+const workload = computed(() => calculateWorkload(lessons.value))
+const hoursTotal = computed(() => workload.value.totalHours)
 const monthLabel = computed(() => {
   const [year, month] = monthValue.value.split('-').map(Number)
   return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
 })
+
+function downloadWorkload() {
+  const blob = new Blob([workloadCsv(workload.value)], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const teacherName = selectedEmployee.value?.Name?.replace(/[^\p{L}\p{N}-]+/gu, '_') || 'преподаватель'
+  link.href = url
+  link.download = `нагрузка_${teacherName}_${monthValue.value}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
 
 onMounted(async () => {
   loadingBranches.value = true
@@ -133,10 +146,14 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
           <h2>Занятия за месяц</h2>
         </div>
         <div class="total-card">
-          <span>Всего занятий</span>
+          <span>Часы по приказу</span>
           <strong>{{ loadingSchedule ? '…' : hoursTotal }}</strong>
-          <small>часов по правилу MVP</small>
+          <small>по доступным данным расписания</small>
         </div>
+      </div>
+      <div v-if="workload.rows.length > 0" class="export-row">
+        <button class="export-button" type="button" @click="downloadWorkload">Скачать расчёт в CSV</button>
+        <span>Файл откроется в Excel; пока выгружаются только рассчитанные категории.</span>
       </div>
 
       <div v-if="error" class="message message-error">
@@ -153,9 +170,43 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
         В расписании нет занятий за {{ monthLabel }}.
       </div>
       <div v-else class="table-frame">
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th>Дисциплина</th><th>Группа</th><th>Лекции</th><th>Лабораторные</th><th>Практические, семинарские</th>
+              <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Итого</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, index) in workload.rows" :key="`${row.discipline}-${row.group}-${index}`">
+              <td class="discipline-cell">{{ row.discipline }}</td><td>{{ row.group }}</td>
+              <td>{{ row.hours.lecture || '—' }}</td><td>{{ row.hours.lab || '—' }}</td><td>{{ row.hours.practical || '—' }}</td>
+              <td>{{ row.hours.consultation || '—' }}</td><td>{{ row.hours.credit || '—' }}</td><td>{{ row.hours.test || '—' }}</td>
+              <td>{{ row.hours.exam || '—' }}</td><td class="hours-cell">{{ row.total }}</td>
+            </tr>
+            <tr class="summary-total">
+              <td colspan="2">Итого</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lecture, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.lab, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.practical, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.consultation, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.credit, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.test, 0) || '—' }}</td>
+              <td>{{ workload.rows.reduce((sum, row) => sum + row.hours.exam, 0) || '—' }}</td>
+              <td class="hours-cell">{{ hoursTotal }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-if="workload.unclassified.length > 0 && !loadingSchedule" class="results-footnote results-footnote-warning">
+        <span class="info-mark">!</span>
+        Не вошли в расчёт {{ workload.unclassified.length }} занятий: для части типов нужны данные о студентах, остальные требуют уточнения нормы.
+      </div>
+      <h3 v-if="lessons.length > 0" class="detail-heading">Исходные занятия</h3>
+      <div v-if="lessons.length > 0" class="table-frame">
         <table>
           <thead>
-            <tr><th>Дата</th><th>Время</th><th>Тип занятия</th><th>Дисциплина</th><th>Группа</th><th>Аудитория</th><th>Часы</th></tr>
+            <tr><th>Дата</th><th>Время</th><th>Тип занятия</th><th>Дисциплина</th><th>Группа</th><th>Аудитория</th></tr>
           </thead>
           <tbody>
             <tr v-for="(lesson, index) in lessons" :key="`${lesson.Data}-${lesson.Time}-${lesson.Group}-${index}`">
@@ -165,14 +216,13 @@ watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, mo
               <td class="discipline-cell">{{ lesson.Discipline }}</td>
               <td>{{ lesson.Group }}</td>
               <td>{{ lesson.Classroom || '—' }}</td>
-              <td class="hours-cell">1</td>
             </tr>
           </tbody>
         </table>
       </div>
       <div v-if="lessons.length > 0 && !loadingSchedule" class="results-footnote">
         <span class="info-mark">i</span>
-        Пока каждое занятие считается за 1 час. Точные правила добавим после разбора приказа.
+        Аудиторное занятие — 1 час на группу; зачёт и экзамен — 0,5 часа на группу и дисциплину.
       </div>
     </section>
 

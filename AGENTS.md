@@ -8,10 +8,11 @@ Build a web app for Russian University of Cooperation teachers to select themsel
 
 - The first version should be a static web app deployable to GitHub Pages.
 - Preferred starting stack: Vue 3, TypeScript, and Vite.
-- The first version counts each scheduled class as 1 hour.
-- Keep class-hour rules configurable so the order's rules can be added later without rewriting schedule loading or the UI.
-- Use the supplied form (`assets/бланк.xls`) and example (`assets/пример.jpeg`) to determine the output structure and validate calculations.
-- The supplied example groups workload by semester, discipline, study form, specialty, course, group, and module, with separate lecture and seminar hour columns. Verify the complete form before implementing export.
+- Keep workload rules configurable so rates and API type mappings can change without rewriting schedule loading or the UI.
+- Use the supplied workbook (`assets/бланк.xlsx`) and its `Образец` sheet to determine the output structure and validate calculations.
+- The card has separate columns for lectures, labs, practical/seminar classes, classroom course work, supervision, consultations, interim assessment, GIA, practice, and totals. The example combines multiple groups into rows where applicable. Build rows grouped by discipline and group, and preserve the workbook's header and signature areas when implementing export.
+- For the first version, do not require student counts. Calculate only supported schedule types: classroom lessons (lectures, practicals, seminars, labs) = 1 hour per class per group; pre-exam consultations = 1 hour per group per discipline; accepting a credit/differentiated credit/exam = 0.5 hour per group per discipline; checking/accepting an in-class test = 0.5 hour per group per discipline. Preparation and student-based activities remain outside the card calculation unless explicitly present as mapped workload items. Keep rates configurable and map raw API `Type` values explicitly. Leave unmatched types out of totals and show them for review.
+- These rates come from Appendix 2, “Нормы времени … по образовательным программам среднего профессионального образования,” of the local reference `assets/приказ.pdf` (pages 17–20 in the supplied PDF). The workbook is available locally and includes both the blank `Карточка нагрузки` sheet and a populated `Образец` sheet; neither source asset is included in the public repository.
 
 ## Schedule API
 
@@ -35,7 +36,7 @@ For a monthly workflow, request a date in each week overlapping that month, then
 - `get_employees/{branchId}` returns a JSON array with `GUID`, `Name`, `Male`, and `Position` fields.
 - A dated schedule request returns an object with `schedule` and `date` properties. `schedule` is keyed by localized day labels; each lesson has fields including `FilialGUID`, `Data` (`DD.MM.YYYY`), `Time_start`, `Time_end`, `Group`, `Type`, `Discipline`, `Employee`, and `Classroom`. `date` includes the requested date and week boundaries/navigation values.
 - The sample schedule distinguishes lesson types such as `Лекция` and `Практические занятия`; keep the source type intact for later rule mapping.
-- Direct API requests succeeded outside the sandbox. The GET response had no `Access-Control-Allow-Origin` header, and the `OPTIONS` request returned HTTP 400. A browser request from the local Vue app also failed before receiving the branch list. Direct browser access is currently blocked, so a static-only GitHub Pages app cannot use this API as-is. Ask the API owner to enable CORS or add a small server-side proxy/backend before completing API integration.
+- Direct API requests succeeded outside the sandbox. The source GET response did not include `Access-Control-Allow-Origin`; the deployed Worker proxy handles browser access for the published app.
 
 ## Architecture guidance
 
@@ -46,14 +47,16 @@ For a monthly workflow, request a date in each week overlapping that month, then
 
 ## Repository state
 
-- A Vue 3 + TypeScript + Vite prototype is scaffolded. It has selectors for branch, employee, and month, loads API data, and displays monthly lesson rows with the MVP 1-hour count.
+- The Vue 3 + TypeScript + Vite app has selectors for branch, employee, and month, loads monthly API data, groups supported workload by discipline/group, shows unmatched entries separately, and downloads a semicolon-delimited UTF-8 CSV for spreadsheet review. The CSV is a first export step and does not yet preserve the supplied workbook formatting or signature area.
 - Direct browser requests to the source API fail because CORS is not enabled. The deployed Worker proxy resolves this for the allowed GitHub Pages origin.
 - A Cloudflare Worker proxy is prepared in `worker/`. It forwards only the known GET endpoints, applies CORS for one configured origin, and the frontend now reads its API base URL from `VITE_SCHEDULE_API_BASE_URL`.
+- Cloudflare Workers Cache is enabled. Worker cache TTLs are route-specific: branches 24 hours, employees 6 hours, schedule 5 minutes. Successful responses receive matching `Cache-Control`; upstream errors are `no-store`.
 - Worker is deployed at `https://ruc-teacher-load-card-api.ruc-teacher-load-card.workers.dev`. Its GET branch-list endpoint returned HTTP 200 with `Access-Control-Allow-Origin: https://shidaro.github.io`.
 - A GitHub Pages Actions workflow is prepared in `.github/workflows/pages.yml`. It requires the repository variable `VITE_SCHEDULE_API_BASE_URL`.
 - Public repository: `https://github.com/shidaro/ruc-teacher-load-card`.
 - Published site: `https://shidaro.github.io/ruc-teacher-load-card/`.
 - The public Git history excludes all supplied `assets/` files. They remain local project references and are not needed by the current app build.
+- Reconciliation is still open: the October 2026 API rows for the supplied teacher were 37 lectures, 43 practical classes, and 1 repeat assessment, while the supplied card photo totals 40 lecture and 82 seminar hours (122 overall). The row-to-card grouping/rate logic must be explained and reconciled before presenting generated totals as final.
 - Git is initialized locally on branch `main`, tracking `origin/main`.
 
 ## Verification and workflow

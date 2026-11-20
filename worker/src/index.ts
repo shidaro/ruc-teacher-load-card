@@ -11,6 +11,12 @@ const ROUTES = [
   new RegExp(`^/api/v1/get_schedule/employee/${UUID}/${UUID}/\\d{4}\\.\\d{2}\\.\\d{2}$`),
 ]
 
+function cacheTtl(pathname: string) {
+  if (pathname === '/api/v1/get_branches') return 86_400
+  if (/^\/api\/v1\/get_employees\//.test(pathname)) return 21_600
+  return 300
+}
+
 function corsHeaders(origin: string) {
   return {
     'Access-Control-Allow-Origin': origin,
@@ -48,14 +54,15 @@ export default {
     }
 
     const upstreamUrl = `${UPSTREAM}${url.pathname.slice('/api/v1'.length)}`
+    const ttl = cacheTtl(url.pathname)
     try {
       const upstream = await fetch(upstreamUrl, {
         headers: { Accept: 'application/json' },
-        cf: { cacheTtl: 300, cacheEverything: true },
+        cf: { cacheTtl: ttl, cacheEverything: true },
       })
       const responseHeaders = new Headers(cors)
       responseHeaders.set('Content-Type', upstream.headers.get('Content-Type') ?? 'application/json')
-      responseHeaders.set('Cache-Control', 'public, max-age=300')
+      responseHeaders.set('Cache-Control', upstream.ok ? `public, max-age=${ttl}` : 'no-store')
       return new Response(upstream.body, { status: upstream.status, headers: responseHeaders })
     } catch {
       return jsonError('Schedule API is temporarily unavailable', 502, cors)
