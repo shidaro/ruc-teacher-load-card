@@ -38,16 +38,46 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
   card.getCell('C5').value = teacherName
   card.getCell('K5').value = monthName(monthValue)
   card.getCell('O5').value = schoolYear(monthValue)
+  card.getCell('P30').value = null // The source template contains whitespace here, which some spreadsheet viewers render as 0.
 
   const firstDataRow = 13
   const originalTotalRow = 28
-  if (summary.rows.length > originalTotalRow - firstDataRow) {
-    const extraRows = summary.rows.length - (originalTotalRow - firstDataRow)
+  const cardRows = summary.rows.filter((item) => [
+    item.hours.lecture,
+    item.hours.lab,
+    item.hours.practical,
+    item.hours.consultation,
+    item.hours.credit,
+    item.hours.test,
+    item.hours.exam,
+    item.hours.individualProject,
+  ].some((hours) => hours !== 0))
+  const templateRowCount = originalTotalRow - firstDataRow
+  if (cardRows.length > templateRowCount) {
+    const extraRows = cardRows.length - templateRowCount
+    const rangesToShift = card.model.merges.filter((range) => {
+      const startRow = Number(range.match(/^[A-Z]+(\d+):/)?.[1])
+      return startRow >= originalTotalRow
+    })
+    for (const range of rangesToShift) card.unMergeCells(range)
     card.insertRows(originalTotalRow, Array.from({ length: extraRows }, () => []), 'i')
+    for (const range of rangesToShift) {
+      const shifted = range.replace(/(\D+)(\d+)/g, (_match, column: string, rowText: string) => `${column}${Number(rowText) + extraRows}`)
+      card.mergeCells(shifted)
+    }
+    const styleSource = card.getRow(originalTotalRow - 1)
+    for (let index = 0; index < extraRows; index += 1) {
+      const insertedRow = card.getRow(originalTotalRow + index)
+      insertedRow.height = styleSource.height
+      insertedRow.hidden = false
+      for (let column = 1; column <= 18; column += 1) {
+        insertedRow.getCell(column).style = { ...styleSource.getCell(column).style }
+      }
+    }
   }
-  const totalRowIndex = originalTotalRow + Math.max(0, summary.rows.length - (originalTotalRow - firstDataRow))
+  const totalRowIndex = originalTotalRow + Math.max(0, cardRows.length - templateRowCount)
 
-  summary.rows.forEach((item, index) => {
+  cardRows.forEach((item, index) => {
     const rowIndex = firstDataRow + index
     const row = card.getRow(rowIndex)
     row.hidden = false
@@ -74,7 +104,7 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
   const categoryColumns = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
   const totals = categoryColumns.map((column) => {
     const key = ({ 4: 'lecture', 5: 'lab', 6: 'practical', 10: 'consultation', 11: 'credit', 12: 'test', 13: 'individualProject', 14: 'exam' } as const)[column as 4 | 5 | 6 | 10 | 11 | 12 | 13 | 14]
-    return key ? roundHours(summary.rows.reduce((sum, item) => sum + item.hours[key], 0)) : 0
+    return key ? roundHours(cardRows.reduce((sum, item) => sum + item.hours[key], 0)) : 0
   })
   totals.forEach((value, index) => { card.getRow(totalRowIndex).getCell(categoryColumns[index]).value = value || null })
   card.getRow(totalRowIndex).getCell(2).value = 'Итого'
@@ -86,7 +116,14 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
     : summary.unclassified.length || summary.studentActivities.some((activity) => activity.studentCount === undefined)
       ? 'Есть занятия, требующие уточнения или данных: см. лист «Проверка». Они не включены в итог карточки.'
       : ''
-  if (note) card.getCell(`B${totalRowIndex + 1}`).value = note
+  if (note) {
+    const noteRow = totalRowIndex + 1
+    card.mergeCells(`B${noteRow}:R${noteRow}`)
+    card.getCell(`B${noteRow}`).value = note
+    card.getCell(`B${noteRow}`).font = { name: 'Times New Roman', size: 9 }
+    card.getCell(`B${noteRow}`).alignment = { vertical: 'middle', horizontal: 'left', wrapText: true }
+    card.getRow(noteRow).height = 24
+  }
 
   const reviewItems = [
     ...summary.studentActivities.map((activity) => ({
