@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { reattestationPlacementOptions } from './workload'
 import type { WorkloadSummary } from './workload'
 import { roundHours } from './workload'
 
@@ -110,12 +111,12 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
   card.getRow(totalRowIndex).getCell(2).value = 'Итого'
   card.getRow(totalRowIndex).getCell(18).value = roundHours(totals.reduce((sum, value) => sum + value, 0))
 
-  const outsideCardCount = summary.studentActivities.filter((activity) => activity.column === 'reattestation').length
-  const note = outsideCardCount
-    ? `Переаттестация рассчитана отдельно и не включена в итог карточки: см. лист «Проверка».`
-    : summary.unclassified.length || summary.studentActivities.some((activity) => activity.studentCount === undefined)
-      ? 'Есть занятия, требующие уточнения или данных: см. лист «Проверка». Они не включены в итог карточки.'
-      : ''
+  const hasPendingStudentActivity = summary.studentActivities.some((activity) =>
+    activity.studentCount === undefined || (activity.column === 'reattestation' && activity.placementColumn === undefined),
+  )
+  const note = summary.unclassified.length || hasPendingStudentActivity
+    ? 'Есть занятия, требующие выбора типа, данных или уточнения: см. лист «Проверка». Они не включены в итог карточки.'
+    : ''
   if (note) {
     const noteRow = totalRowIndex + 1
     card.mergeCells(`B${noteRow}:R${noteRow}`)
@@ -126,15 +127,26 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
   }
 
   const reviewItems = [
-    ...summary.studentActivities.map((activity) => ({
-      lesson: activity.lesson,
-      status: activity.studentCount === undefined ? 'Нужно указать число студентов' : `Рассчитано: ${roundHours(activity.hours)} ч; отдельно от итогов карточки`,
-      rule: activity.rule,
-      count: activity.studentCount ?? null,
-      rate: activity.ratePerStudent,
-      hours: activity.studentCount === undefined ? null : roundHours(activity.hours),
-    })),
-    ...summary.unclassified.map((activity) => ({ lesson: activity.lesson, status: activity.reason, rule: '', count: null, rate: null, hours: null })),
+    ...summary.studentActivities.map((activity) => {
+      const placementLabel = activity.placementColumn
+        ? reattestationPlacementOptions.find((option) => option.value === activity.placementColumn)?.label ?? activity.placementColumn
+        : activity.column === 'individualProject' ? 'Курсовая работа / проект' : ''
+      const status = activity.column === 'reattestation' && !activity.placementColumn
+        ? 'Выберите тип в карточке'
+        : activity.studentCount === undefined
+          ? 'Нужно указать число студентов'
+          : `Рассчитано: ${roundHours(activity.hours)} ч`
+      return {
+        lesson: activity.lesson,
+        status,
+        placement: placementLabel,
+        rule: activity.rule,
+        count: activity.studentCount ?? null,
+        rate: activity.ratePerStudent,
+        hours: activity.studentCount === undefined ? null : roundHours(activity.hours),
+      }
+    }),
+    ...summary.unclassified.map((activity) => ({ lesson: activity.lesson, status: activity.reason, placement: '', rule: '', count: null, rate: null, hours: null })),
   ]
   if (reviewItems.length) {
     const review = workbook.addWorksheet('Проверка')
@@ -142,8 +154,8 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
       { header: 'Дата', key: 'date', width: 14 }, { header: 'Время', key: 'time', width: 12 },
       { header: 'Вид занятия', key: 'type', width: 34 }, { header: 'Дисциплина', key: 'discipline', width: 38 },
       { header: 'Группа', key: 'group', width: 20 }, { header: 'Статус / что уточнить', key: 'status', width: 70 },
-      { header: 'Норма', key: 'rule', width: 50 }, { header: 'Студентов', key: 'count', width: 14 },
-      { header: 'Часов на студента', key: 'rate', width: 20 }, { header: 'Часы', key: 'hours', width: 14 },
+      { header: 'Колонка карточки', key: 'placement', width: 38 }, { header: 'Норма', key: 'rule', width: 50 },
+      { header: 'Студентов', key: 'count', width: 14 }, { header: 'Часов на студента', key: 'rate', width: 20 }, { header: 'Часы', key: 'hours', width: 14 },
     ]
     review.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }
     review.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF31566D' } }
@@ -155,6 +167,7 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
         discipline: item.lesson.Discipline,
         group: item.lesson.Group,
         status: item.status,
+        placement: item.placement,
         rule: item.rule,
         count: item.count,
         rate: item.rate,
@@ -162,7 +175,7 @@ export async function downloadWorkloadXlsx(summary: WorkloadSummary, teacherName
       })
     }
     review.views = [{ state: 'frozen', ySplit: 1 }]
-    review.autoFilter = { from: 'A1', to: 'J1' }
+    review.autoFilter = { from: 'A1', to: 'K1' }
   }
 
   const buffer = await workbook.xlsx.writeBuffer()

@@ -78,6 +78,8 @@ h2 { margin: 7px 0 0; font-size: 23px; font-weight: 700; }
 .review-table small { display: inline-block; margin-top: 4px; color: #8c969e; white-space: normal; }
 .student-count-input { width: 92px; height: 34px; border: 1px solid #d8dfe4; border-radius: 6px; padding: 0 8px; color: #293945; }
 .student-count-input:focus { border-color: #6da1c2; outline: 3px solid #e8f2f8; }
+.placement-select { min-width: 190px; max-width: 260px; height: 34px; border: 1px solid #d8dfe4; border-radius: 6px; padding: 0 8px; color: #293945; background: #fff; }
+.placement-select:focus { border-color: #6da1c2; outline: 3px solid #e8f2f8; }
 .review-reason { min-width: 360px; white-space: normal; line-height: 1.45; }
 .review-help { margin: -10px 0 8px; color: #7e8b95; font-size: 11px; line-height: 1.5; }
 .export-row { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }

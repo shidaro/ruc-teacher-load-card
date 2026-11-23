@@ -1,6 +1,14 @@
 import type { Lesson } from '../api/schedule'
 
-export type WorkloadColumn = 'lecture' | 'lab' | 'practical' | 'consultation' | 'credit' | 'test' | 'exam' | 'reattestation' | 'individualProject'
+export type WorkloadColumn = 'lecture' | 'lab' | 'practical' | 'consultation' | 'credit' | 'test' | 'exam' | 'individualProject'
+export type ReattestationPlacement = 'credit' | 'test' | 'individualProject' | 'exam'
+
+export const reattestationPlacementOptions: Array<{ value: ReattestationPlacement; label: string }> = [
+  { value: 'credit', label: 'Зачёт / дифференцированный зачёт' },
+  { value: 'test', label: 'Аудиторная контрольная работа' },
+  { value: 'individualProject', label: 'Курсовая работа / проект' },
+  { value: 'exam', label: 'Экзамен' },
+]
 
 export interface WorkloadRow {
   discipline: string
@@ -23,6 +31,7 @@ export interface StudentActivity {
   column: 'reattestation' | 'individualProject'
   rule: string
   studentCount?: number
+  placementColumn?: ReattestationPlacement
   hours: number
 }
 
@@ -32,7 +41,7 @@ export interface UnclassifiedActivity {
   reason: string
 }
 
-const columns: WorkloadColumn[] = ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'reattestation', 'individualProject']
+const columns: WorkloadColumn[] = ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'individualProject']
 
 // Workload rates use halves and tenths of an hour. Round each accumulated result
 // to two decimal places to avoid exposing binary floating-point artifacts.
@@ -86,7 +95,11 @@ function activityId(lesson: Lesson) {
     .join('\u0000')
 }
 
-export function calculateWorkload(lessons: Lesson[], studentCounts: Record<string, number | undefined> = {}): WorkloadSummary {
+export function calculateWorkload(
+  lessons: Lesson[],
+  studentCounts: Record<string, number | undefined> = {},
+  studentActivityPlacements: Record<string, ReattestationPlacement | undefined> = {},
+): WorkloadSummary {
   const byGroup = new Map<string, WorkloadRow>()
   const classroomSessions = new Map<string, { lesson: Lesson; groups: Set<string>; hours: number; column: WorkloadColumn }>()
   const studentActivities = new Map<string, StudentActivity>()
@@ -182,6 +195,7 @@ export function calculateWorkload(lessons: Lesson[], studentCounts: Record<strin
             lesson,
             ...studentRule,
             studentCount: validCount,
+            placementColumn: studentRule.column === 'reattestation' ? studentActivityPlacements[id] : undefined,
             hours: validCount === undefined ? 0 : roundHours(validCount * studentRule.ratePerStudent),
           })
         }
@@ -225,8 +239,10 @@ export function calculateWorkload(lessons: Lesson[], studentCounts: Record<strin
   }
 
   for (const activity of studentActivities.values()) {
+    const targetColumn = activity.column === 'reattestation' ? activity.placementColumn : activity.column
+    if (!targetColumn || (activity.column === 'reattestation' && activity.studentCount === undefined)) continue
     const row = getRow(activity.lesson)
-    row.hours[activity.column] += activity.hours
+    row.hours[targetColumn] += activity.hours
   }
 
   const rows = [...byGroup.values()].map((row) => {

@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { formatLessonDate, getBranches, getEmployees, getMonthlySchedule } from './api/schedule'
 import type { Branch, Employee, Lesson } from './api/schedule'
-import { calculateWorkload, formatHours, roundHours } from './domain/workload'
+import { calculateWorkload, formatHours, reattestationPlacementOptions, roundHours } from './domain/workload'
+import type { ReattestationPlacement } from './domain/workload'
 
 const today = new Date()
 const monthValue = ref(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
@@ -13,6 +14,7 @@ const selectedBranchId = ref('')
 const selectedEmployeeId = ref('')
 const lessons = ref<Lesson[]>([])
 const studentCounts = ref<Record<string, number | undefined>>({})
+const studentActivityPlacements = ref<Record<string, ReattestationPlacement | undefined>>({})
 const loadingBranches = ref(false)
 const loadingEmployees = ref(false)
 const loadingSchedule = ref(false)
@@ -28,16 +30,20 @@ const filteredEmployees = computed(() => {
       || employee.Position?.toLocaleLowerCase('ru-RU').includes(query),
   )
 })
-const workload = computed(() => calculateWorkload(lessons.value, studentCounts.value))
+const workload = computed(() => calculateWorkload(lessons.value, studentCounts.value, studentActivityPlacements.value))
 const hoursTotal = computed(() => workload.value.totalHours)
 const workloadColumnTotals = computed(() => Object.fromEntries(
-  ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'reattestation', 'individualProject'].map((column) => [
+  ['lecture', 'lab', 'practical', 'consultation', 'credit', 'test', 'exam', 'individualProject'].map((column) => [
     column,
     roundHours(workload.value.rows.reduce((sum, row) => sum + row.hours[column as keyof typeof row.hours], 0)),
   ]),
 ) as Record<string, number>)
 const pendingStudentCount = computed(() => workload.value.studentActivities.filter((activity) => activity.studentCount === undefined).length)
-const reviewItemCount = computed(() => pendingStudentCount.value + workload.value.unclassified.length)
+const pendingPlacementCount = computed(() => workload.value.studentActivities.filter((activity) => activity.column === 'reattestation' && activity.placementColumn === undefined).length)
+const pendingStudentActivities = computed(() => workload.value.studentActivities.filter((activity) =>
+  activity.studentCount === undefined || (activity.column === 'reattestation' && activity.placementColumn === undefined),
+).length)
+const reviewItemCount = computed(() => pendingStudentActivities.value + workload.value.unclassified.length)
 const monthLabel = computed(() => {
   const [year, month] = monthValue.value.split('-').map(Number)
   return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1))
@@ -67,6 +73,17 @@ function updateStudentCount(id: string, event: Event) {
   }
 
   studentCounts.value = next
+}
+
+function updateStudentActivityPlacement(id: string, event: Event) {
+  const value = (event.target as HTMLSelectElement).value as ReattestationPlacement | ''
+  const next = { ...studentActivityPlacements.value }
+  if (!value || !reattestationPlacementOptions.some((option) => option.value === value)) {
+    delete next[id]
+  } else {
+    next[id] = value
+  }
+  studentActivityPlacements.value = next
 }
 
 onMounted(async () => {
@@ -103,6 +120,7 @@ watch(selectedBranchId, async (branchId) => {
 watch([selectedEmployeeId, monthValue, selectedBranchId], async ([employeeId, month, branchId]) => {
   lessons.value = []
   studentCounts.value = {}
+  studentActivityPlacements.value = {}
   if (!employeeId || !branchId || !month) return
 
   loadingSchedule.value = true
@@ -228,13 +246,13 @@ function handleEmployeeSearch() {
       <template v-else>
         <div v-if="reviewItemCount > 0 && !loadingSchedule" class="results-footnote results-footnote-warning">
           <span class="info-mark">!</span>
-          {{ reviewItemCount }} занятий требуют внимания: {{ pendingStudentCount }} — введите число студентов, {{ workload.unclassified.length }} — уточните норму. Список ниже.
+          {{ reviewItemCount }} занятий требуют внимания: {{ pendingPlacementCount }} — выберите тип для карточки, {{ pendingStudentCount }} — введите число студентов, {{ workload.unclassified.length }} — уточните норму. Список ниже.
         </div>
         <section v-if="workload.studentActivities.length > 0 || workload.unclassified.length > 0" class="review-section">
-          <h3 class="detail-heading">Занятия, требующие данных или уточнения</h3>
+          <h3 class="detail-heading">Занятия с дополнительными данными</h3>
           <div v-if="workload.studentActivities.length > 0" class="table-frame review-table-frame">
             <table class="review-table">
-              <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Норма</th><th>Студентов</th><th>Часы</th></tr></thead>
+              <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Норма</th><th>Колонка карточки</th><th>Студентов</th><th>Часы</th></tr></thead>
               <tbody>
                 <tr v-for="activity in workload.studentActivities" :key="activity.id">
                   <td class="date-cell">{{ formatLessonDate(activity.lesson.Data) }}</td>
@@ -242,13 +260,20 @@ function handleEmployeeSearch() {
                   <td class="discipline-cell">{{ activity.lesson.Discipline || '—' }}</td>
                   <td>{{ activity.lesson.Group || '—' }}</td>
                   <td>{{ activity.ratePerStudent.toLocaleString('ru-RU') }} ч / студент<br /><small>{{ activity.rule }}</small></td>
+                  <td>
+                    <select v-if="activity.column === 'reattestation'" class="placement-select" :value="activity.placementColumn ?? ''" :aria-label="`Тип переаттестации для карточки: ${activity.lesson.Discipline}, ${activity.lesson.Group}`" @change="updateStudentActivityPlacement(activity.id, $event)">
+                      <option value="">Выберите тип</option>
+                      <option v-for="option in reattestationPlacementOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                    <span v-else>Курсовая работа / проект</span>
+                  </td>
                   <td><input class="student-count-input" type="number" min="0" step="1" inputmode="numeric" :aria-label="`Количество студентов: ${activity.lesson.Discipline}, ${activity.lesson.Group}`" :value="activity.studentCount ?? ''" @input="updateStudentCount(activity.id, $event)" /></td>
                   <td class="hours-cell">{{ activity.studentCount === undefined ? '—' : formatHours(activity.hours) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p v-if="workload.studentActivities.length > 0" class="review-help">Введите число студентов, к которым относится конкретная аттестация или защита. Часы пересчитаются автоматически. Введённые числа сохраняются только пока открыта эта страница.</p>
+          <p v-if="workload.studentActivities.length > 0" class="review-help">Для повторной аттестации выберите тип колонки в бланке и укажите число студентов. Для защиты индивидуального проекта укажите только число студентов. Значения сохраняются только пока открыта эта страница.</p>
           <div v-if="workload.unclassified.length > 0" class="table-frame review-table-frame">
             <table class="review-table">
               <thead><tr><th>Дата</th><th>Тип</th><th>Дисциплина</th><th>Группа</th><th>Что уточнить</th></tr></thead>
@@ -269,7 +294,7 @@ function handleEmployeeSearch() {
             <thead>
               <tr>
                 <th>Дисциплина</th><th>Группа</th><th>Лекции</th><th>Лабораторные</th><th>Практические, семинарские</th>
-                <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Переаттестация</th><th>Защита индивидуального проекта</th><th>Итого</th>
+                <th>Консультации</th><th>Зачёты</th><th>Контрольные</th><th>Экзамены</th><th>Курсовые работы и проекты</th><th>Итого</th>
               </tr>
             </thead>
             <tbody>
@@ -277,7 +302,7 @@ function handleEmployeeSearch() {
                 <td class="discipline-cell">{{ row.discipline }}</td><td>{{ row.group }}</td>
                 <td>{{ row.hours.lecture ? formatHours(row.hours.lecture) : '—' }}</td><td>{{ row.hours.lab ? formatHours(row.hours.lab) : '—' }}</td><td>{{ row.hours.practical ? formatHours(row.hours.practical) : '—' }}</td>
                 <td>{{ row.hours.consultation ? formatHours(row.hours.consultation) : '—' }}</td><td>{{ row.hours.credit ? formatHours(row.hours.credit) : '—' }}</td><td>{{ row.hours.test ? formatHours(row.hours.test) : '—' }}</td>
-                <td>{{ row.hours.exam ? formatHours(row.hours.exam) : '—' }}</td><td>{{ row.hours.reattestation ? formatHours(row.hours.reattestation) : '—' }}</td><td>{{ row.hours.individualProject ? formatHours(row.hours.individualProject) : '—' }}</td>
+                <td>{{ row.hours.exam ? formatHours(row.hours.exam) : '—' }}</td><td>{{ row.hours.individualProject ? formatHours(row.hours.individualProject) : '—' }}</td>
                 <td class="hours-cell">{{ formatHours(row.total) }}</td>
               </tr>
               <tr class="summary-total">
@@ -289,7 +314,6 @@ function handleEmployeeSearch() {
                 <td>{{ workloadColumnTotals.credit ? formatHours(workloadColumnTotals.credit) : '—' }}</td>
                 <td>{{ workloadColumnTotals.test ? formatHours(workloadColumnTotals.test) : '—' }}</td>
                 <td>{{ workloadColumnTotals.exam ? formatHours(workloadColumnTotals.exam) : '—' }}</td>
-                <td>{{ workloadColumnTotals.reattestation ? formatHours(workloadColumnTotals.reattestation) : '—' }}</td>
                 <td>{{ workloadColumnTotals.individualProject ? formatHours(workloadColumnTotals.individualProject) : '—' }}</td>
                 <td class="hours-cell">{{ formatHours(hoursTotal) }}</td>
               </tr>
