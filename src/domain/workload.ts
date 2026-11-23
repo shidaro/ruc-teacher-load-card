@@ -70,8 +70,12 @@ function normalized(value: string) {
   return value.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
 }
 
+function disciplineLabel(lesson: Lesson) {
+  return lesson.Discipline?.trim() || lesson.Type?.trim() || 'Дисциплина не указана'
+}
+
 function rowKey(lesson: Lesson) {
-  return `${normalized(lesson.Discipline)}\u0000${normalized(lesson.Group)}`
+  return `${normalized(disciplineLabel(lesson))}\u0000${normalized(lesson.Group)}`
 }
 
 function groupSetKey(discipline: string, groups: string[]) {
@@ -111,7 +115,7 @@ export function calculateWorkload(
     let row = byGroup.get(key)
     if (!row) {
       row = {
-        discipline: lesson.Discipline?.trim() || 'Дисциплина не указана',
+        discipline: disciplineLabel(lesson),
         group: lesson.Group?.trim() || 'Группа не указана',
         hours: Object.fromEntries(columns.map((column) => [column, 0])) as Record<WorkloadColumn, number>,
         total: 0,
@@ -224,11 +228,11 @@ export function calculateWorkload(
   for (const session of classroomSessions.values()) {
     const groups = [...session.groups].sort((left, right) => left.localeCompare(right, 'ru'))
     const groupLabel = groups.join('; ') || 'Группа не указана'
-    const key = groupSetKey(session.lesson.Discipline ?? '', groups)
+    const key = groupSetKey(disciplineLabel(session.lesson), groups)
     let row = byGroup.get(key)
     if (!row) {
       row = {
-        discipline: session.lesson.Discipline?.trim() || 'Дисциплина не указана',
+        discipline: disciplineLabel(session.lesson),
         group: groupLabel,
         hours: Object.fromEntries(columns.map((column) => [column, 0])) as Record<WorkloadColumn, number>,
         total: 0,
