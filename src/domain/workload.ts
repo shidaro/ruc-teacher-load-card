@@ -51,6 +51,12 @@ const classroomTypes: Array<{ column: WorkloadColumn; pattern: RegExp }> = [
   { column: 'practical', pattern: /практическ|семинар/i },
 ]
 
+// This lesson arrives with an empty Type and its name in Discipline. The card
+// has no generic classroom column, so it is included with practical/seminar hours.
+const classroomDisciplines: Array<{ column: WorkloadColumn; pattern: RegExp }> = [
+  { column: 'practical', pattern: /^разговоры о важном$/i },
+]
+
 function normalized(value: string) {
   return value.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
 }
@@ -104,7 +110,9 @@ export function calculateWorkload(lessons: Lesson[], studentCounts: Record<strin
 
   for (const lesson of lessons) {
     const type = normalized(lesson.Type ?? '')
+    const discipline = normalized(lesson.Discipline ?? '')
     const classroom = classroomTypes.find((entry) => entry.pattern.test(type))
+      ?? classroomDisciplines.find((entry) => entry.pattern.test(discipline))
     if (classroom) {
       const hours = scheduledHours(lesson.Time ?? '')
       if (hours === undefined) {
